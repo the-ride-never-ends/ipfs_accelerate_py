@@ -841,5 +841,288 @@ class openai_api:
             self.messages = messagesList
         return messagesList
 
-    def __test__(self):
+    def _test_model_endpoints(self):
+        """Check to see if the models are available for each API endpoint"""
+        endpoints = {
+            'chat': chat_completion_models,
+            'embedding': embedding_models,
+            'image': image_models,
+            'moderation': moderation_models,
+            'speech': speech_to_text,
+            'tts': text_to_speech,
+            'translation': translation_models,
+            'vision': vision_models
+        }
+
+        for endpoint, models in endpoints.items():
+            for model in models:
+                try:
+                    if endpoint == 'chat':
+                        openai.chat.completions.create(model=model, messages=[{"role": "user", "content": "Test"}])
+                    elif endpoint == 'embedding':
+                        openai.embeddings.create(model=model, input="Test")
+                    elif endpoint == 'image':
+                        openai.images.generate(model=model, prompt="Test")
+                    elif endpoint == 'moderation':
+                        openai.moderations.create(model=model, input="Test")
+                    elif endpoint == 'speech':
+                        with tempfile.NamedTemporaryFile(suffix=".mp3") as temp_file:
+                            openai.audio.transcriptions.create(model=model, file=temp_file.name)
+                    elif endpoint == 'tts':
+                        openai.audio.speech.create(model=model, input="Test", voice="alloy")
+                    elif endpoint == 'translation':
+                        with tempfile.NamedTemporaryFile(suffix=".mp3") as temp_file:
+                            openai.audio.translations.create(model=model, file=temp_file.name)
+                    elif endpoint == 'vision':
+                        openai.chat.completions.create(
+                            model=model,
+                            messages=[
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "text", "text": "What's in this image?"},
+                                        {
+                                            "type": "image_url",
+                                            "image_url": {"url": "https://example.com/image.jpg"}
+                                        }
+                                    ]
+                                }
+                            ]
+                        )
+                    print(f"Model {model} is available for {endpoint} endpoint")
+                except Exception as e:
+                    print(f"Error testing model {model} for {endpoint} endpoint: {str(e)}")
         return None
+
+    def _test_token_size(self):
+        """Check to see if the max token size for each model is correct"""
+        max_tokens = {
+            'o1': 100000,
+            'o1-mini': 65536,
+            'o1-preview': 32768,
+            'o3-mini': 100000,
+            'gpt-4o': 16384,
+            'gpt-4o-audio-preview': 16384,
+            'gpt-4o-realtime-preview': 4096,
+            'gpt-4o-mini': 16384,
+            'gpt-4o-mini-audio-preview': 16384,
+            'gpt-4o-mini-realtime-preview': 4096,
+            'gpt-4': 8192,
+            'gpt-4-0613': 8192,
+            'gpt-4-0125-preview': 4096,
+            'gpt-4-1106-preview': 128000,
+            'gpt-3.5-turbo': 4096,
+            'gpt-3.5-turbo-0125': 4096,
+            'gpt-3.5-turbo-1106': 16385,
+            'gpt-3.5-turbo-16k': 16385,
+            'gpt-3.5-turbo-instruct': 4096,
+            'gpt-3.5-turbo-instruct-0914': 4096,
+            'gpt-4-turbo-preview': 4096,
+            'chatgpt-4o-latest': 16384
+        }
+
+        for model, expected_max_tokens in max_tokens.items():
+            try:
+                # Generate a string of the expected length
+                test_string = "test " * (expected_max_tokens // 5)  # Approximate 5 tokens per word
+
+                # Attempt to tokenize the string
+                tokens = self.tokenize(test_string, model)
+                actual_max_tokens = len(tokens)
+
+                # Check if the actual token count is within a small margin of error (e.g., 1%)
+                margin = expected_max_tokens * 0.01
+                if abs(actual_max_tokens - expected_max_tokens) <= margin:
+                    print(f"Model {model}: Max token size correct ({actual_max_tokens})")
+                else:
+                    print(f"Model {model}: Max token size mismatch. Expected {expected_max_tokens}, got {actual_max_tokens}")
+
+            except Exception as e:
+                print(f"Error testing max token size for model {model}: {str(e)}")
+
+        return None
+
+    def _test_for_tool_model_tool_use(self):
+        """Check to see if the tool-use models support tool use"""
+        for model in tool_models:
+            try:
+                # Define a simple tool
+                tools = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "get_current_weather",
+                            "description": "Get the current weather in a given location",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "location": {
+                                        "type": "string",
+                                        "description": "The city and state, e.g. San Francisco, CA"
+                                    },
+                                    "unit": {
+                                        "type": "string",
+                                        "enum": ["celsius", "fahrenheit"]
+                                    }
+                                },
+                                "required": ["location"]
+                            }
+                        }
+                    }
+                ]
+
+                # Test the model with tool use
+                response = openai.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "user", "content": "What's the weather like in New York?"}
+                    ],
+                    tools=tools,
+                    tool_choice="auto"
+                )
+
+                # Check if the model attempted to use the tool
+                if response.choices[0].message.tool_calls:
+                    print(f"Model {model} successfully supports tool use.")
+                else:
+                    print(f"Model {model} did not attempt to use the provided tool.")
+
+            except Exception as e:
+                print(f"Error testing tool use for model {model}: {str(e)}")
+
+        return None
+
+    def _test_models_with_vision_capabilities(self):
+        """Check to see if the listed vision models support vision capabilities"""
+        test_image_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/320px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+        test_prompt = "What's in this image?"
+
+        for model in vision_models:
+            try:
+                response = openai.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": test_prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": test_image_url}
+                                }
+                            ]
+                        }
+                    ]
+                )
+
+                if response.choices and response.choices[0].message.content:
+                    print(f"Model {model} successfully processed the image and provided a response.")
+                    print(f"Response: {response.choices[0].message.content[:100]}...")  # Print first 100 characters
+                else:
+                    print(f"Model {model} did not provide a valid response for the image.")
+
+            except Exception as e:
+                print(f"Error testing vision capabilities for model {model}: {str(e)}")
+
+        return None
+
+    def _test_models_with_audio_capabilities(self):
+        """Check to see if the listed audio models support audio capabilities"""
+        test_audio_url = "https://github.com/openai/whisper/raw/main/tests/jfk.flac"
+        test_text = "This is a test for text-to-speech capabilities."
+
+        # Test speech-to-text models
+        print("Testing speech-to-text models:")
+        for model in speech_to_text:
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".flac") as temp_file:
+                    # Download the test audio file
+                    subprocess.run(["wget", "-O", temp_file.name, test_audio_url], check=True)
+
+                    # Attempt transcription
+                    transcript = openai.audio.transcriptions.create(
+                        model=model,
+                        file=temp_file.name
+                    )
+                    print(f"Model {model} successfully transcribed audio. First 50 characters: {transcript.text[:50]}...")
+            except Exception as e:
+                print(f"Error testing speech-to-text for model {model}: {str(e)}")
+
+        # Test text-to-speech models
+        print("\nTesting text-to-speech models:")
+        for model in text_to_speech:
+            try:
+                response = openai.audio.speech.create(
+                    model=model,
+                    voice="alloy",
+                    input=test_text
+                )
+                print(f"Model {model} successfully generated speech audio.")
+            except Exception as e:
+                print(f"Error testing text-to-speech for model {model}: {str(e)}")
+
+        # Test translation models
+        print("\nTesting audio translation models:")
+        for model in translation_models:
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".flac") as temp_file:
+                    # Download the test audio file
+                    subprocess.run(["wget", "-O", temp_file.name, test_audio_url], check=True)
+
+                    # Attempt translation
+                    translation = openai.audio.translations.create(
+                        model=model,
+                        file=temp_file.name
+                    )
+                    print(f"Model {model} successfully translated audio. First 50 characters: {translation.text[:50]}...")
+            except Exception as e:
+                print(f"Error testing audio translation for model {model}: {str(e)}")
+
+        return None
+
+    def _test_embedding_models():
+        """Test the functionality of embedding models."""
+        return None
+
+    def _test_completions():
+        """Test the functionality of completion models."""
+        return None
+
+    def _test_image_models():
+        """Test the functionality of image generation models."""
+        return None
+
+    def _test_moderation_models():
+        """Test the functionality of content moderation models."""
+        return None
+
+    def _test_speech_to_text():
+        """Test the functionality of speech-to-text models."""
+        return None
+
+    def _test_text_to_speech():
+        """Test the functionality of text-to-speech models."""
+        return None
+
+    def _test_whisper_models():
+        """Test the functionality of Whisper models for audio transcription."""
+        return None
+
+    def _test_translation_models():
+        """Test the functionality of translation models."""
+        return None
+
+    def __test__(self):
+        self._test_model_endpoints()
+        self._test_token_size()
+        self._test_for_tool_model_tool_use()
+        self._test_models_with_vision_capabilities()
+        self._test_models_with_audio_capabilities()
+        self._test_embedding_models()
+        self._test_completions()
+        self._test_image_models()
+        self._test_moderation_models()
+        self._test_speech_to_text()
+        self._test_text_to_speech()
+        self._test_whisper_models()
+        self._test_translation_models()
